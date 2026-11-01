@@ -3,7 +3,8 @@ name: Sync KDE System Tray Mirror
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    # Midnight IST (00:00 Asia/Kolkata) = 18:30 UTC
+    - cron: "30 18 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,30 +16,47 @@ concurrency:
 
 jobs:
   sync:
+    name: Sync upstream System Tray directory
     runs-on: ubuntu-latest
-    steps:
-      - name: Install Git subtree
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-subtree
+    timeout-minutes: 30
 
+    steps:
       - name: Fetch KDE upstream
         run: |
-          git clone https://invent.kde.org/plasma/plasma-workspace.git upstream
-          git -C upstream fetch origin master:refs/remotes/origin/master
+          set -euo pipefail
+          git clone --depth 1 --single-branch --branch master \
+            https://invent.kde.org/plasma/plasma-workspace.git upstream
 
-      - name: Extract System Tray directory
-        run: |
-          git -C upstream subtree split \
-            --prefix=applets/systemtray \
-            origin/master \
-            --branch=systemtray-mirror
+          test -d upstream/applets/systemtray
+          test -n "$(find upstream/applets/systemtray -mindepth 1 -print -quit)"
 
-      - name: Push mirror to main
+      - name: Checkout mirror
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git -C upstream push \
-            "https://x-access-token:${GH_TOKEN}@github.com/Stark-0505/plasma-systemtray.git" \
-            systemtray-mirror:main \
-            --force
+          set -euo pipefail
+          git clone \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            --branch main mirror
+
+      - name: Synchronize directory contents
+        run: |
+          set -euo pipefail
+
+          rsync -a --delete \
+            upstream/applets/systemtray/ \
+            mirror/
+
+          git -C mirror config user.name "github-actions[bot]"
+          git -C mirror config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git -C mirror add -A
+
+          if git -C mirror diff --cached --quiet; then
+            echo "Mirror is already up to date."
+          else
+            git -C mirror commit \
+              -m "Sync KDE System Tray from upstream"
+            git -C mirror push origin HEAD:main
+          fi
