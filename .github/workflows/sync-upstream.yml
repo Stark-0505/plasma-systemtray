@@ -1,0 +1,44 @@
+
+name: Sync KDE System Tray Mirror
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: systemtray-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Git subtree
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-subtree
+
+      - name: Fetch KDE upstream
+        run: |
+          git clone https://invent.kde.org/plasma/plasma-workspace.git upstream
+          git -C upstream fetch origin master:refs/remotes/origin/master
+
+      - name: Extract System Tray directory
+        run: |
+          git -C upstream subtree split \
+            --prefix=applets/systemtray \
+            origin/master \
+            --branch=systemtray-mirror
+
+      - name: Push mirror to main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git -C upstream push \
+            "https://x-access-token:${GH_TOKEN}@github.com/Stark-0505/plasma-systemtray.git" \
+            systemtray-mirror:main \
+            --force
